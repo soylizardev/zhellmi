@@ -42,6 +42,8 @@ fn main() -> Result<()> {
     // 3. Bienvenida Z-Series
     println!("🛡️ {}Zhellmi 0.0.3{} - developed for ZAMI", BOLD, RESET);
 
+    core::environ::init_zami_environment();
+
     // 4. LOOP PRINCIPAL
     loop {
         let prompt = generate_prompt();

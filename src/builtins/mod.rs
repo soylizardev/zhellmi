@@ -4,9 +4,9 @@ pub mod stats;
 
 use std::ffi::CStr;
 use std::io::{self, Write};
+
 // Esta función centraliza el chequeo de comandos internos.
 // Devuelve true si el comando era un builtin y se ejecutó.
-//
 
 fn builtin_whoami() {
     unsafe {
@@ -41,6 +41,27 @@ pub fn builtin_zsudo(args: &[&str]) {
     crate::core::executor::execute_command(cmd, cmd_args);
 }
 
+pub fn builtin_export(args: &[&str]) {
+    if args.is_empty() {
+        // Si solo escriben 'export', mostramos todas las variables (como una shell real)
+        for (key, val) in std::env::vars() {
+            println!("declare -x {}=\"{}\"", key, val);
+        }
+        return;
+    }
+
+    for arg in args {
+        // Buscamos el formato CLAVE=VALOR
+        if let Some((key, value)) = arg.split_once('=') {
+            unsafe {
+                std::env::set_var(key, value);
+            }
+        } else {
+            eprintln!("Zm: export: formato incorrecto. Uso: export CLAVE=VALOR");
+        }
+    }
+}
+
 pub fn handle_builtin(cmd: &str, args: &[&str]) -> bool {
     match cmd {
         "cd" => {
@@ -51,6 +72,10 @@ pub fn handle_builtin(cmd: &str, args: &[&str]) -> bool {
             // Nota: Mantenemos ls aquí como builtin para aplicar tus colores ZAMI
             // de directorios sin depender de los flags de BusyBox.
             stats::builtin_ls(args);
+            true
+        }
+        "export" => {
+            builtin_export(args);
             true
         }
         "pwd" => {
