@@ -13,7 +13,15 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     }
 }
 
-// Podrás añadir aquí funciones futuras como:
-// - logs de errores en archivos específicos de ZAMI.
-// - Validadores de permisos de archivos.
-// - Parsers de tiempo para el uptime.
+pub fn expand_env_var(word: &str) -> String {
+    if word.starts_with('$') {
+        // Le quitamos el '$' inicial para buscar el nombre real
+        let var_name = &word[1..];
+
+        // Buscamos la variable en el sistema. Si no existe, devolvemos vacío.
+        env::var(var_name).unwrap_or_else(|_| "".to_string())
+    } else {
+        // Si no es una variable, devolvemos la palabra tal cual
+        word.to_string()
+    }
+}

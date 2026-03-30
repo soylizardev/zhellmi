@@ -5,21 +5,21 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter, Result, Validato
 use std::io::{self, Write};
 
 // --- IMPORTACIÓN DE MÓDULOS ---
-mod core;
 mod builtins;
+mod core;
 mod ui;
 mod utils;
 
 use crate::core::executor::execute_command;
 use crate::core::parser::parse_input; // Importamos tu parser modular
-use crate::ui::prompt::generate_prompt;
 use crate::ui::colors::{BOLD, RESET};
+use crate::ui::prompt::generate_prompt;
 
 // --- HELPER PARA AUTOCOMPLETADO (TAB) ---
 #[derive(Helper, Completer, Hinter, Highlighter, Validator)]
 struct ZhellmiHelper {
     #[rustyline(Completer)]
-    completer: FilenameCompleter, 
+    completer: FilenameCompleter,
     #[rustyline(Hinter)]
     hinter: HistoryHinter,
 }
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
         match rl.readline(&prompt) {
             Ok(line) => {
                 let input = line.trim();
-                
+
                 // Ignorar vacíos o comentarios
                 if input.is_empty() || input.starts_with('#') {
                     continue;
@@ -57,11 +57,11 @@ fn main() -> Result<()> {
 
                 // Guardar en historial
                 let _ = rl.add_history_entry(input);
-                
+
                 // --- PROCESAR ENTRADA CON EL PARSER MODULAR ---
                 if let Some((cmd, args)) = parse_input(input) {
-                    
                     // Manejo de comandos críticos del loop
+                    // Nota: ahora 'cmd' es un String, así que lo comparamos como slice (&cmd)
                     if cmd == "exit" {
                         let _ = rl.save_history("history.txt");
                         break;
@@ -73,8 +73,12 @@ fn main() -> Result<()> {
                         continue;
                     }
 
-                    // Enviamos al ejecutor (él decidirá si es Builtin o Binario de la Isla)
-                    execute_command(cmd, &args);
+                    // Adaptador de Tipos: Convertimos el Vec<String> a Vec<&str>
+                    // Esto permite que tu ejecutor siga siendo ultra-eficiente
+                    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+                    // Enviamos al ejecutor
+                    execute_command(&cmd, &args_ref);
                 }
             }
             Err(ReadlineError::Interrupted) => {

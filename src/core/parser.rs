@@ -1,23 +1,19 @@
-/// Toma la línea cruda de la terminal y devuelve un Option con (comando, argumentos)
-/// Si la línea es un comentario o está vacía, devuelve None.
-pub fn parse_input(line: &str) -> Option<(&str, Vec<&str>)> {
-    let trimmed = line.trim();
+use crate::utils::expand_env_var;
 
-    // 1. Regla de Oro: Ignorar vacíos y comentarios
-    if trimmed.is_empty() || trimmed.starts_with('#') {
-        return None;
+pub fn parse_input(line: &str) -> Option<(String, Vec<String>)> {
+    let mut parts = line.split_whitespace();
+
+    // Obtenemos el comando principal y lo expandimos
+    // (por si alguien escribe `$COMANDO` en lugar de un nombre directo)
+    let raw_cmd = parts.next()?;
+    let cmd = expand_env_var(raw_cmd);
+
+    if cmd.is_empty() {
+        return None; // Si la variable estaba vacía y no hay comando, abortamos
     }
 
-    // 2. Segmentación: Separamos por espacios en blanco
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    // Mapeamos el resto de los argumentos pasándolos por el expansor
+    let args: Vec<String> = parts.map(expand_env_var).collect();
 
-    // 3. Extracción: El primer elemento es el comando, el resto son argumentos
-    if parts.is_empty() {
-        return None;
-    }
-
-    let command = parts[0];
-    let args = parts[1..].to_vec();
-
-    Some((command, args))
+    Some((cmd, args))
 }
