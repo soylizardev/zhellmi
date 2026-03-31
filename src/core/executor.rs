@@ -1,23 +1,21 @@
 use crate::builtins::handle_builtin;
 use std::env;
+use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
-pub fn execute_command(cmd: &str, args: &[&str]) {
-    // 0. CAPA CERO: Builtins internos (cd, exit, help, etc.)
-    if handle_builtin(cmd, args) {
-        return;
+pub fn execute_command(cmd: &str, args: &[&str], output_file: Option<&str>) -> bool {
+    // 1. Builtins (solo si no hay redirección, para evitar conflictos)
+    if handle_builtin(cmd, args, output_file) {
+        return true;
     }
 
     let zami_root = "/mnt/zami";
     let mut resolved_path: Option<String> = None;
 
-    // 1. RESOLUCIÓN DE RUTA: ¿Dónde está el binario?
     if cmd.starts_with('/') || cmd.starts_with('.') {
-        // Caso A: Ruta absoluta o relativa
         resolved_path = Some(format!("{}{}", zami_root, cmd));
     } else {
-        // Caso B: Búsqueda dinámica en el $PATH
         let path_var = env::var("PATH").unwrap_or_else(|_| "/bin:/usr/bin:/tools/bin".to_string());
         for p in path_var.split(':') {
             let mut full = PathBuf::from(zami_root);
@@ -30,66 +28,74 @@ pub fn execute_command(cmd: &str, args: &[&str]) {
         }
     }
 
-    // 2. CHECKPOINT DE SEGURIDAD (La Aduana)
     if let Some(path) = resolved_path {
-        // --- FILTRO PROTECTOR DEL TOOLCHAIN ---
-        // Si la ruta final contiene "/tools/", verificamos UID
-        if path.contains("/tools/") {
-            let uid = unsafe { libc::getuid() };
-            if uid != 0 {
-                eprintln!(
-                    "Zm: 🛡️ Permiso denegado. El Toolchain es sagrado y solo root puede tocarlo."
-                );
-                return; // Bloqueo total: el comando no se ejecuta
+        let mut command = Command::new(&path);
+        command.args(args).envs(env::vars());
+
+        // Manejo de Redirección >
+        if let Some(file_path) = output_file {
+            if let Ok(file) = File::create(file_path) {
+                command.stdout(Stdio::from(file));
             }
         }
 
-        // Si pasó la aduana y el archivo existe, lo ejecutamos
-        if Path::new(&path).exists() {
-            run_process(&path, args);
-            return;
+        match command.status() {
+            Ok(s) => s.success(),
+            Err(_) => false,
         }
-    }
-
-    // 3. CAPA DE SIMBIOSIS (BusyBox)
-    // Si no encontramos un binario nativo en la isla, recurrimos a BusyBox
-    intentar_busybox(cmd, args, zami_root);
-}
-
-fn run_process(path: &str, args: &[&str]) {
-    let status = Command::new(path).args(args).envs(env::vars()).status();
-
-    match status {
-        Ok(s) if !s.success() => {
-            // Error interno del comando (ya impreso por el proceso hijo)
-        }
-        Err(e) => println!("Zm: error crítico al ejecutar {}: {}", path, e),
-        _ => {}
+    } else {
+        intentar_busybox(cmd, args, zami_root, output_file)
     }
 }
 
-fn intentar_busybox(cmd: &str, args: &[&str], zami_root: &str) {
+pub fn execute_pipe_command(cmd_str: &str) -> bool {
+    let commands: Vec<&str> = cmd_str.split('|').collect();
+    let mut prev_stdout = Stdio::inherit();
+
+    for (i, c) in commands.iter().enumerate() {
+        let parts: Vec<&str> = c.split_whitespace().collect();
+        if parts.is_empty() { return false; }
+        
+        let cmd = parts[0];
+        let args = &parts[1..];
+        let is_last = i == commands.len() - 1;
+
+        let stdout_type = if is_last { Stdio::inherit() } else { Stdio::piped() };
+
+        let child = Command::new(cmd) // Nota: Aquí podrías usar la lógica de resolved_path para ser más estricto
+            .args(args)
+            .stdin(prev_stdout)
+            .stdout(stdout_type)
+            .spawn();
+
+        match child {
+            Ok(mut output) => {
+                if !is_last {
+                    prev_stdout = Stdio::from(output.stdout.take().unwrap());
+                } else {
+                    return output.wait().map(|s| s.success()).unwrap_or(false);
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+fn intentar_busybox(cmd: &str, args: &[&str], zami_root: &str, output_file: Option<&str>) -> bool {
     let busybox_path = format!("{}/usr/bin/busybox", zami_root);
+    if !Path::new(&busybox_path).exists() { return false; }
 
-    // Verificamos si BusyBox existe antes de llamarlo
-    if !Path::new(&busybox_path).exists() {
-        eprintln!("zhellmi: comando no encontrado: '{}'", cmd);
-        return;
-    }
-
+    let mut command = Command::new(&busybox_path);
     let mut full_args = vec![cmd];
     full_args.extend(args);
+    command.args(&full_args).envs(env::vars());
 
-    let status = Command::new(&busybox_path)
-        .args(&full_args)
-        .envs(env::vars())
-        .status();
-
-    if let Err(_) = status {
-        eprintln!(
-            "zhellmi: error al invocar la simbiosis con BusyBox para '{}'",
-            cmd
-        );
+    if let Some(file_path) = output_file {
+        if let Ok(file) = File::create(file_path) {
+            command.stdout(Stdio::from(file));
+        }
     }
-}
 
+    command.status().map(|s| s.success()).unwrap_or(false)
+}

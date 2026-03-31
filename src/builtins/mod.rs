@@ -21,7 +21,7 @@ fn builtin_whoami() {
     }
 }
 
-pub fn builtin_zsudo(args: &[&str]) {
+pub fn builtin_zsudo(args: &[&str], output_file: Option<&str>) {
     if args.is_empty() {
         println!("zsudo: uso: zsudo <comando> [argumentos]");
         return;
@@ -38,7 +38,7 @@ pub fn builtin_zsudo(args: &[&str]) {
     let cmd_args = &args[1..];
 
     // Llamamos al ejecutor principal para que procese el comando "con permisos"
-    crate::core::executor::execute_command(cmd, cmd_args);
+    crate::core::executor::execute_command(cmd, cmd_args, output_file);
 }
 
 pub fn builtin_export(args: &[&str]) {
@@ -62,15 +62,20 @@ pub fn builtin_export(args: &[&str]) {
     }
 }
 
-pub fn handle_builtin(cmd: &str, args: &[&str]) -> bool {
+pub fn handle_builtin(cmd: &str, args: &[&str], output_file: Option<&str>) -> bool {
     match cmd {
         "cd" => {
             cd::run(args);
             true
         }
         "ls" => {
-            // Nota: Mantenemos ls aquí como builtin para aplicar tus colores ZAMI
-            // de directorios sin depender de los flags de BusyBox.
+            // Si el primer argumento empieza con '-', delegamos a BusyBox (retornamos false)
+            if let Some(arg) = args.get(0) {
+                if arg.starts_with('-') {
+                    return false; 
+                }
+            }
+            // Si no hay flags, usamos tu ls con colores ZAMI
             stats::builtin_ls(args);
             true
         }
@@ -106,7 +111,7 @@ pub fn handle_builtin(cmd: &str, args: &[&str]) -> bool {
             true // Retornamos true: "Yo me encargué de este comando"
         }
         "zsudo" => {
-            builtin_zsudo(args);
+            builtin_zsudo(args, output_file); // Le pasamos el archivo
             true
         }
         "zreboot" => {
