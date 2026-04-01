@@ -2,6 +2,7 @@ use rustyline::completion::FilenameCompleter;
 use rustyline::error::ReadlineError;
 use rustyline::hint::HistoryHinter;
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter, Result, Validator};
+use std::io::{self, Write}; // <--- 1. Añadimos esto para el flush del cursor
 
 // --- IMPORTACIÓN DE MÓDULOS ---
 mod builtins;
@@ -9,7 +10,7 @@ mod core;
 mod ui;
 mod utils;
 
-use crate::core::parser::execute_pipeline; // Importamos el pipeline inteligente
+use crate::core::parser::execute_pipeline; 
 use crate::ui::colors::{BOLD, RESET};
 use crate::ui::prompt::generate_prompt;
 
@@ -20,6 +21,15 @@ struct ZhellmiHelper {
     completer: FilenameCompleter,
     #[rustyline(Hinter)]
     hinter: HistoryHinter,
+}
+
+// 2. Esta función activa el cursor parpadeante enviando el código ANSI al Kernel
+fn setup_terminal() {
+    let mut stdout = io::stdout();
+    // \x1b[?25h -> Muestra el cursor
+    // \x1b[5 q  -> Fuerza el estilo "guion parpadeante" (blink underline)
+    print!("\x1b[?25h\x1b[5 q"); 
+    let _ = stdout.flush();
 }
 
 fn main() -> Result<()> {
@@ -36,7 +46,9 @@ fn main() -> Result<()> {
 
     let _ = rl.load_history("history.txt");
 
-    println!("🛡️ {}Zhellmi 0.9.0{} - developed for ZAMI", BOLD, RESET);
+    println!("🛡️ {}Zhellmi 1.0.1{} - developed for ZAMI", BOLD, RESET);
+
+    setup_terminal(); // <--- 3. Lo llamamos una sola vez aquí
 
     loop {
         let prompt = generate_prompt();
@@ -51,7 +63,6 @@ fn main() -> Result<()> {
 
                 let _ = rl.add_history_entry(input);
 
-                // Mandamos toda la línea al cerebro lógico
                 execute_pipeline(input);
             }
             Err(ReadlineError::Interrupted) => {

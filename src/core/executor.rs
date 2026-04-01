@@ -10,7 +10,14 @@ pub fn execute_command(cmd: &str, args: &[&str], output_file: Option<&str>) -> b
         return true;
     }
 
-    let zami_root = "/mnt/zami";
+    // DETECCIÓN DE ENTORNO: 
+    // Si /mnt/zami existe, estamos en Fedora. Si no, estamos en ZAMI real (raíz /).
+    let zami_root = if Path::new("/mnt/zami").exists() {
+        "/mnt/zami"
+    } else {
+        ""
+    };
+
     let mut resolved_path: Option<String> = None;
 
     if cmd.starts_with('/') || cmd.starts_with('.') {
@@ -52,6 +59,9 @@ pub fn execute_pipe_command(cmd_str: &str) -> bool {
     let commands: Vec<&str> = cmd_str.split('|').collect();
     let mut prev_stdout = Stdio::inherit();
 
+    // Detectar root para pipes también
+    let zami_root = if Path::new("/mnt/zami").exists() { "/mnt/zami" } else { "" };
+
     for (i, c) in commands.iter().enumerate() {
         let parts: Vec<&str> = c.split_whitespace().collect();
         if parts.is_empty() { return false; }
@@ -62,7 +72,24 @@ pub fn execute_pipe_command(cmd_str: &str) -> bool {
 
         let stdout_type = if is_last { Stdio::inherit() } else { Stdio::piped() };
 
-        let child = Command::new(cmd) // Nota: Aquí podrías usar la lógica de resolved_path para ser más estricto
+        // Intentamos resolver la ruta del comando para el pipe
+        let mut full_cmd_path = cmd.to_string();
+        if !cmd.starts_with('/') && !cmd.starts_with('.') {
+             let path_var = env::var("PATH").unwrap_or_else(|_| "/bin:/usr/bin".to_string());
+             for p in path_var.split(':') {
+                let mut p_check = PathBuf::from(zami_root);
+                p_check.push(p.trim_start_matches('/'));
+                p_check.push(cmd);
+                if p_check.exists() {
+                    full_cmd_path = p_check.to_string_lossy().into_owned();
+                    break;
+                }
+             }
+        } else {
+            full_cmd_path = format!("{}{}", zami_root, cmd);
+        }
+
+        let child = Command::new(full_cmd_path)
             .args(args)
             .stdin(prev_stdout)
             .stdout(stdout_type)
@@ -83,19 +110,35 @@ pub fn execute_pipe_command(cmd_str: &str) -> bool {
 }
 
 fn intentar_busybox(cmd: &str, args: &[&str], zami_root: &str, output_file: Option<&str>) -> bool {
-    let busybox_path = format!("{}/usr/bin/busybox", zami_root);
-    if !Path::new(&busybox_path).exists() { return false; }
+    // Intentamos las dos rutas posibles de busybox en ZAMI
+    let paths = [
+        format!("{}/bin/busybox", zami_root),
+        format!("{}/usr/bin/busybox", zami_root),
+    ];
 
-    let mut command = Command::new(&busybox_path);
-    let mut full_args = vec![cmd];
-    full_args.extend(args);
-    command.args(&full_args).envs(env::vars());
-
-    if let Some(file_path) = output_file {
-        if let Ok(file) = File::create(file_path) {
-            command.stdout(Stdio::from(file));
+    let mut final_path = None;
+    for p in &paths {
+        if Path::new(p).exists() {
+            final_path = Some(p.clone());
+            break;
         }
     }
 
-    command.status().map(|s| s.success()).unwrap_or(false)
+    if let Some(path) = final_path {
+        let mut command = Command::new(path);
+        // BusyBox necesita el comando como primer argumento
+        let mut full_args = vec![cmd];
+        full_args.extend(args);
+        command.args(&full_args).envs(env::vars());
+
+        if let Some(file_path) = output_file {
+            if let Ok(file) = File::create(file_path) {
+                command.stdout(Stdio::from(file));
+            }
+        }
+
+        command.status().map(|s| s.success()).unwrap_or(false)
+    } else {
+        false
+    }
 }
